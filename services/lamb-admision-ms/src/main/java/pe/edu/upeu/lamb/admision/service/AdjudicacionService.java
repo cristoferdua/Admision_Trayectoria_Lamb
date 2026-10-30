@@ -10,19 +10,26 @@ import pe.edu.upeu.lamb.admision.exception.BusinessRuleException;
 import pe.edu.upeu.lamb.admision.exception.ResourceNotFoundException;
 import pe.edu.upeu.lamb.admision.mapper.AdjudicacionMapper;
 import pe.edu.upeu.lamb.admision.repository.AdjudicacionRepository;
+import pe.edu.upeu.lamb.admision.repository.CalificacionRepository;
 import pe.edu.upeu.lamb.admision.repository.ModalidadAdmisionRepository;
 import pe.edu.upeu.lamb.admision.repository.PostulanteRepository;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 public class AdjudicacionService {
 
+    private static final Set<EstadoPostulante> ESTADOS_NO_ADJUDICABLES =
+            Set.of(EstadoPostulante.NO_ADMITIDO, EstadoPostulante.ANULADO);
+
     private final AdjudicacionRepository repo;
     private final PostulanteRepository postulanteRepo;
     private final ModalidadAdmisionRepository modalidadRepo;
+    private final CalificacionRepository calificacionRepo;
+    private final ReglasInscripcionService reglas;
     private final AdjudicacionMapper mapper;
 
     @Transactional(readOnly = true)
@@ -38,6 +45,12 @@ public class AdjudicacionService {
         return mapper.toResponse(buscar(id));
     }
 
+    /**
+     * Adjudicar consume una vacante de la modalidad. Igual que al aprobar una
+     * inscripcion, la fila de la modalidad se bloquea (SELECT ... FOR UPDATE)
+     * para que dos adjudicaciones simultaneas no superen el cupo. Si alguna
+     * regla falla, rollback: ni adjudicacion ni contador movido.
+     */
     @Transactional
     public AdjudicacionResponse crear(AdjudicacionRequest r) {
         if (repo.existsByPostulanteId(r.getIdPostulante())) {
@@ -45,8 +58,20 @@ public class AdjudicacionService {
         }
         Postulante p = postulanteRepo.findById(r.getIdPostulante())
                 .orElseThrow(() -> new ResourceNotFoundException("Postulante no encontrado: " + r.getIdPostulante()));
-        ModalidadAdmision m = modalidadRepo.findById(r.getIdModalidad())
+        if (ESTADOS_NO_ADJUDICABLES.contains(p.getEstado())) {
+            throw new BusinessRuleException("No se puede adjudicar a un postulante en estado " + p.getEstado());
+        }
+        if (!p.getModalidad().getId().equals(r.getIdModalidad())) {
+            throw new BusinessRuleException("El postulante esta registrado en la modalidad "
+                    + p.getModalidad().getId() + ", no en " + r.getIdModalidad());
+        }
+        if (!calificacionRepo.existsByPostulanteId(p.getId())) {
+            throw new BusinessRuleException("El postulante no tiene calificacion de examen registrada");
+        }
+
+        ModalidadAdmision m = modalidadRepo.findByIdParaReserva(r.getIdModalidad())
                 .orElseThrow(() -> new ResourceNotFoundException("Modalidad no encontrada: " + r.getIdModalidad()));
+        reglas.reservarVacante(m);
 
         AdjudicacionVacante a = AdjudicacionVacante.builder()
                 .postulante(p)
@@ -88,6 +113,13 @@ public class AdjudicacionService {
         AdjudicacionVacante a = buscar(id);
         if (a.getEstado() == EstadoAdjudicacion.PUBLICADA) {
             throw new BusinessRuleException("No se puede eliminar una adjudicacion PUBLICADA; use ANULADA");
+        }
+        // Compensacion: si la adjudicacion seguia vigente, devuelve la vacante
+        if (a.getEstado() == EstadoAdjudicacion.ADJUDICADA) {
+            ModalidadAdmision m = modalidadRepo.findByIdParaReserva(a.getModalidad().getId())
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Modalidad no encontrada: " + a.getModalidad().getId()));
+            reglas.liberarVacante(m);
         }
         repo.delete(a);
     }

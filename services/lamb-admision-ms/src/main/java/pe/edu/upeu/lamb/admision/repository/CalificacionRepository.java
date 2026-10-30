@@ -10,4 +10,5 @@ public interface CalificacionRepository extends JpaRepository<CalificacionExamen
     List<CalificacionExamen> findByExamenId(Long idExamen);
     Optional<CalificacionExamen> findByExamenIdAndPostulanteId(Long idExamen, Long idPostulante);
     boolean existsByExamenIdAndPostulanteId(Long idExamen, Long idPostulante);
+    boolean existsByPostulanteId(Long idPostulante);
 }
