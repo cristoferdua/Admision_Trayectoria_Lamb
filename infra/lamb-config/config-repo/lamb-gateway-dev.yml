@@ -69,7 +69,7 @@ spring:
             - id: lamb-trayectoria
               uri: lb://lamb-trayectoria-ms
               predicates:
-                - Path=/api/v1/trayectorias/**
+                - Path=/api/v1/trayectorias/**,/api/v1/alertas-riesgo/**,/api/v1/cambios-academicos/**,/api/v1/casos-seguimiento/**,/api/v1/controles-repitencia/**,/api/v1/cumplimientos-requisito/**,/api/v1/egresos/**,/api/v1/informes-trayectoria/**,/api/v1/niveles-riesgo/**,/api/v1/planes-refuerzo/**,/api/v1/programas-tutoria/**,/api/v1/reconocimientos/**,/api/v1/reglas-alerta/**,/api/v1/sesiones-tutoria/**,/api/v1/situaciones-cierre/**,/api/v1/solicitudes-constancia/**,/api/v1/tutorias/**,/api/v1/vistas/avance-curricular,/api/v1/vistas/historial-academico,/api/v1/vistas/promedio-ponderado,/api/v1/vistas/rendimiento-por-curso,/api/v1/vistas/historial-estados
             - id: lamb-finanzas
               uri: lb://lamb-finanzas-ms
               predicates:

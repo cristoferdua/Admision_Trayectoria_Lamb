@@ -89,6 +89,19 @@ public class SecurityConfig {
             "/api/v1/facultades/**", "/api/v1/programas/**", "/api/v1/personas/**"
     };
 
+    // Trayectoria: 6 CRUD del documento v3 + vistas calculadas
+    private static final String[] TRAYECTORIA = {
+            "/api/v1/trayectorias/**", "/api/v1/alertas-riesgo/**", "/api/v1/cambios-academicos/**",
+            "/api/v1/casos-seguimiento/**", "/api/v1/controles-repitencia/**", "/api/v1/cumplimientos-requisito/**",
+            "/api/v1/egresos/**", "/api/v1/informes-trayectoria/**", "/api/v1/niveles-riesgo/**",
+            "/api/v1/planes-refuerzo/**", "/api/v1/programas-tutoria/**", "/api/v1/reconocimientos/**",
+            "/api/v1/reglas-alerta/**", "/api/v1/sesiones-tutoria/**", "/api/v1/situaciones-cierre/**",
+            "/api/v1/solicitudes-constancia/**", "/api/v1/tutorias/**",
+            "/api/v1/vistas/avance-curricular", "/api/v1/vistas/historial-academico",
+            "/api/v1/vistas/promedio-ponderado", "/api/v1/vistas/rendimiento-por-curso",
+            "/api/v1/vistas/historial-estados"
+    };
+
     // realm_access.roles (formato Keycloak) -> ROLE_<rol> para hasRole(...)
     @Bean
     public JwtAuthenticationConverter jwtAuthenticationConverter() {
@@ -140,7 +153,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/solicitudes-grupo-equivalente/**").hasAnyRole("ADMIN", "COORDINADOR", "ESTUDIANTE")
                         .requestMatchers("/api/v1/actas/**").hasAnyRole("ADMIN", "COORDINADOR", "DOCENTE")
                         .requestMatchers(HttpMethod.GET, "/api/v1/trayectorias/me").authenticated()
-                        .requestMatchers("/api/v1/trayectorias/**").hasAnyRole("ADMIN", "COORDINADOR", "DOCENTE")
+                        .requestMatchers(HttpMethod.GET, TRAYECTORIA).authenticated()
+                        .requestMatchers(TRAYECTORIA).hasAnyRole("ADMIN", "COORDINADOR")
                         .requestMatchers(HttpMethod.GET, "/api/v1/notas/**").authenticated()
                         .requestMatchers("/api/v1/notas/**").hasAnyRole("ADMIN", "DOCENTE")
                         .requestMatchers(HttpMethod.GET, INSTITUCIONAL_PERSONAS).authenticated()
