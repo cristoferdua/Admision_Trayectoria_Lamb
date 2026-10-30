@@ -21,7 +21,6 @@ $servicios = @(
     @{ Nombre = 'lamb-config';               Dir = 'infra\lamb-config';                  Puerto = 18888; Health = 'http://localhost:18888/actuator/health' },
     @{ Nombre = 'lamb-eureka';               Dir = 'infra\lamb-eureka';                  Puerto = 18761; Health = 'http://localhost:18761/actuator/health' },
     @{ Nombre = 'lamb-admision-ms';          Dir = 'services\lamb-admision-ms';          Puerto = 8084;  Health = 'http://localhost:8084/actuator/health' },
-    @{ Nombre = 'lamb-auth-ms';              Dir = 'services\lamb-auth-ms';              Puerto = 8091;  Health = 'http://localhost:8091/actuator/health' },
     @{ Nombre = 'lamb-curriculo-ms';         Dir = 'services\lamb-curriculo-ms';         Puerto = 8088;  Health = 'http://localhost:8088/actuator/health' },
     @{ Nombre = 'lamb-planificacion-ms';     Dir = 'services\lamb-planificacion-ms';     Puerto = 8083;  Health = 'http://localhost:8083/actuator/health' },
     @{ Nombre = 'lamb-evaluacion-ms';        Dir = 'services\lamb-evaluacion-ms';        Puerto = 8086;  Health = 'http://localhost:8086/actuator/health' },
@@ -61,7 +60,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 docker compose -f (Join-Path $raiz 'kafka\compose-dev.yml') up -d
-foreach ($ms in 'auth', 'admision', 'curriculo', 'planificacion', 'evaluacion', 'trayectoria') {
+# Keycloak reemplaza a lamb-auth-ms como emisor de tokens (puerto 18180, realm lamb)
+docker compose -f (Join-Path $raiz 'keycloak\compose-dev.yml') up -d
+foreach ($ms in 'admision', 'curriculo', 'planificacion', 'evaluacion', 'trayectoria') {
     docker compose -f (Join-Path $raiz "services\lamb-$ms-ms\compose-dev.yml") up -d
 }
 
@@ -111,35 +112,20 @@ foreach ($s in $servicios) {
     Write-Host ("{0,-24} {1,-6} {2}" -f $s.Nombre, $s.Puerto, $estado) -ForegroundColor $color
 }
 
-# El Gateway tarda ~30 s en ver en su cache de Eureka a los servicios recien registrados
-Write-Host '== Esperando que el Gateway enrute hacia lamb-auth-ms...' -ForegroundColor Cyan
-$limite = (Get-Date).AddSeconds(120)
-$login = '{"email":"admin@lamb.edu.pe","password":"admin123"}'
-do {
-    try {
-        Invoke-RestMethod -Method Post -Uri 'http://localhost:18080/api/v1/auth/login' -ContentType 'application/json' -Body $login -TimeoutSec 5 | Out-Null
-        $rutaOk = $true
-    } catch {
-        $rutaOk = $false
-        Start-Sleep -Seconds 3
-    }
-} while (-not $rutaOk -and (Get-Date) -lt $limite)
-Write-Host ("Gateway -> auth: {0}" -f $(if ($rutaOk) { 'OK' } else { 'todavia no' })) -ForegroundColor $(if ($rutaOk) { 'Green' } else { 'Red' })
-
-# Con token: el Gateway llega a los 3 servicios del modulo
-if ($rutaOk) {
-    $token = (Invoke-RestMethod -Method Post -Uri 'http://localhost:18080/api/v1/auth/login' -ContentType 'application/json' -Body $login).access_token
-    foreach ($ruta in '/api/v1/postulaciones', '/api/v1/planes-estudio', '/api/v1/secciones', '/api/v1/actas', '/api/v1/trayectorias') {
-        $limite = (Get-Date).AddSeconds(90)
-        do {
-            try { Invoke-RestMethod "http://localhost:18080$ruta" -Headers @{ Authorization = "Bearer $token" } -TimeoutSec 5 | Out-Null; $ok = $true }
-            catch { $ok = $false; Start-Sleep -Seconds 3 }
-        } while (-not $ok -and (Get-Date) -lt $limite)
-        Write-Host ("Gateway -> {0}: {1}" -f $ruta, $(if ($ok) { 'OK' } else { 'todavia no' }))
-    }
-    # planificacion refresca su lista de Eureka cada 5 s: margen para que Feign ya vea a curriculo
-    Start-Sleep -Seconds 10
+# El Gateway tarda ~30 s en ver en su cache de Eureka a los servicios recien registrados.
+# Sin token cada ruta protegida debe responder 401 (y no 503): asi se sabe que el Gateway ya enruta.
+# (El login es con Keycloak + PKCE desde el frontend; el cliente lamb-frontend no acepta usuario/clave directo.)
+foreach ($ruta in '/api/v1/postulaciones', '/api/v1/planes-estudio', '/api/v1/grupos', '/api/v1/actas', '/api/v1/trayectorias') {
+    $limite = (Get-Date).AddSeconds(90)
+    do {
+        try { Invoke-WebRequest "http://localhost:18080$ruta" -UseBasicParsing -TimeoutSec 5 | Out-Null; $codigo = 200 }
+        catch { $codigo = [int]$_.Exception.Response.StatusCode }
+        if ($codigo -ne 401) { Start-Sleep -Seconds 3 }
+    } while ($codigo -ne 401 -and (Get-Date) -lt $limite)
+    Write-Host ("Gateway -> {0}: {1}" -f $ruta, $(if ($codigo -eq 401) { 'OK (401 sin token)' } else { "todavia no ($codigo)" }))
 }
+# planificacion refresca su lista de Eureka cada 5 s: margen para que Feign ya vea a curriculo
+Start-Sleep -Seconds 10
 
 # 4. Paginas de evidencia
 if (-not $SinNavegador) {
@@ -147,8 +133,7 @@ if (-not $SinNavegador) {
         'http://localhost:18761',                                         # Eureka: los 6 servicios registrados
         'http://localhost:18888/lamb-planificacion-ms/dev',              # Config Server: parametros (CB, Kafka, JWT)
         'http://localhost:18090',                                         # Kafka UI: topics y consumer groups
-        'http://localhost:8091/.well-known/jwks.json',                    # S7: clave publica (JWKS)
-        'http://localhost:8091/swagger-ui.html',                          # S7: login
+        'http://localhost:18180/realms/lamb/protocol/openid-connect/certs', # S7: clave publica (JWKS de Keycloak)
         'http://localhost:8083/actuator/circuitbreakers',                 # S6: estado del circuit breaker
         'http://localhost:8083/actuator/health',                          # S6: health con circuitBreakers
         'http://localhost:8083/swagger-ui.html',                          # planificacion
